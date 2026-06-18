@@ -123,6 +123,25 @@ function createRoomCode() {
   throw new Error("Could not allocate room code");
 }
 
+function findLatestJoinableRoom() {
+  let bestRoom = null;
+  for (const room of rooms.values()) {
+    if (!room || !room.host || room.host.destroyed) {
+      continue;
+    }
+
+    if (room.client && !room.client.destroyed) {
+      continue;
+    }
+
+    if (!bestRoom || room.createdAt > bestRoom.createdAt) {
+      bestRoom = room;
+    }
+  }
+
+  return bestRoom;
+}
+
 function handleMessage(socket, message) {
   if (!message || typeof message.type !== "string") {
     send(socket, { type: "error", message: "Bad message" });
@@ -157,7 +176,15 @@ function handleMessage(socket, message) {
   if (message.type === "join") {
     const code = String(message.code || "").replace(/\D/g, "");
     const paddedCode = code.length > 0 && code.length < 6 ? code.padStart(6, "0") : code;
-    const room = rooms.get(code) || rooms.get(paddedCode);
+    let room = rooms.get(code) || rooms.get(paddedCode);
+    if (!room || !room.host || room.host.destroyed) {
+      const fallbackRoom = findLatestJoinableRoom();
+      if (fallbackRoom) {
+        console.log(`[room ${code || "(empty)"}] not found, joining latest active room ${fallbackRoom.code}`);
+        room = fallbackRoom;
+      }
+    }
+
     if (!room || !room.host || room.host.destroyed) {
       console.log(`[room ${code || "(empty)"}] join failed: not found`);
       send(socket, { type: "error", message: "Room not found. Press HOST again and use the new code." });
@@ -264,7 +291,7 @@ function serveStatic(request, response) {
 
   if (!fs.existsSync(staticRoot)) {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    response.end(`<h1>WebRTC signaling server</h1><p>Server OK.</p><p>Build folder not found: ${escapeHtml(staticRoot)}</p>`);
+    response.end(renderStatusPage(`<p>Build folder not found: ${escapeHtml(staticRoot)}</p>`));
     return;
   }
 
@@ -300,6 +327,27 @@ function serveStatic(request, response) {
     response.writeHead(200, headers);
     response.end(content);
   });
+}
+
+function renderStatusPage(extraHtml = "") {
+  const activeRooms = [];
+  for (const room of rooms.values()) {
+    if (!room || !room.host || room.host.destroyed) {
+      continue;
+    }
+
+    activeRooms.push(`<li>${escapeHtml(room.code)} - ${room.client && !room.client.destroyed ? "client connected" : "waiting client"}</li>`);
+  }
+
+  const roomsHtml = activeRooms.length > 0 ? `<ul>${activeRooms.join("")}</ul>` : "<p>No active rooms.</p>";
+  return [
+    "<h1>WebRTC signaling server</h1>",
+    "<p>Server OK.</p>",
+    `<p>Version: ${escapeHtml(serverVersion)}</p>`,
+    "<h2>Active rooms</h2>",
+    roomsHtml,
+    extraHtml
+  ].join("");
 }
 
 function contentType(filePath) {
