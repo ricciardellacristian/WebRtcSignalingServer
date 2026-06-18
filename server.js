@@ -7,6 +7,7 @@ const crypto = require("crypto");
 const port = Number(process.env.PORT || 8787);
 const staticRoot = path.resolve(process.argv[2] || process.env.WEBGL_DIR || path.join(__dirname, "..", "..", "Builds", "WebGL"));
 const rooms = new Map();
+const serverVersion = "room-code-v2-no-leading-zero";
 
 function send(socket, message) {
   if (!socket || socket.destroyed) {
@@ -158,6 +159,7 @@ function handleMessage(socket, message) {
     const paddedCode = code.length > 0 && code.length < 6 ? code.padStart(6, "0") : code;
     const room = rooms.get(code) || rooms.get(paddedCode);
     if (!room || !room.host || room.host.destroyed) {
+      console.log(`[room ${code || "(empty)"}] join failed: not found`);
       send(socket, { type: "error", message: "Room not found. Press HOST again and use the new code." });
       return;
     }
@@ -413,6 +415,7 @@ setInterval(() => {
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`WebRTC signaling server on port ${port}`);
+  console.log(`Server version: ${serverVersion}`);
   console.log(`Serving WebGL from: ${staticRoot}`);
   for (const address of localAddresses()) {
     console.log(`Open from headset: http://${address}:${port}/`);
