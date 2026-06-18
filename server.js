@@ -113,7 +113,7 @@ function parseFrames(socket, data) {
 
 function createRoomCode() {
   for (let i = 0; i < 1000; i++) {
-    const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+    const code = String(crypto.randomInt(100000, 1000000));
     if (!rooms.has(code)) {
       return code;
     }
@@ -125,6 +125,11 @@ function createRoomCode() {
 function handleMessage(socket, message) {
   if (!message || typeof message.type !== "string") {
     send(socket, { type: "error", message: "Bad message" });
+    return;
+  }
+
+  if (message.type === "ping") {
+    send(socket, { type: "pong" });
     return;
   }
 
@@ -150,9 +155,10 @@ function handleMessage(socket, message) {
 
   if (message.type === "join") {
     const code = String(message.code || "").replace(/\D/g, "");
-    const room = rooms.get(code);
+    const paddedCode = code.length > 0 && code.length < 6 ? code.padStart(6, "0") : code;
+    const room = rooms.get(code) || rooms.get(paddedCode);
     if (!room || !room.host || room.host.destroyed) {
-      send(socket, { type: "error", message: "Room not found" });
+      send(socket, { type: "error", message: "Room not found. Press HOST again and use the new code." });
       return;
     }
 
@@ -164,13 +170,13 @@ function handleMessage(socket, message) {
     leaveRoom(socket);
     room.client = socket;
     socket._role = "client";
-    socket._roomCode = code;
-    send(socket, { type: "joined", code });
-    send(room.host, { type: "peer-joined", code });
+    socket._roomCode = room.code;
+    send(socket, { type: "joined", code: room.code });
+    send(room.host, { type: "peer-joined", code: room.code });
     if (room.lastOffer) {
       send(socket, { type: "signal", from: "host", data: room.lastOffer });
     }
-    console.log(`[room ${code}] client joined`);
+    console.log(`[room ${room.code}] client joined`);
     return;
   }
 
@@ -368,6 +374,8 @@ server.on("upgrade", (request, socket) => {
     socket.destroy();
     return;
   }
+
+  socket.setKeepAlive(true, 15000);
 
   const accept = crypto
     .createHash("sha1")
